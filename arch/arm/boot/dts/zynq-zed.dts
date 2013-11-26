@@ -316,5 +316,12 @@
 			interrupts = <0 7 4>;
 			reg = <0xf8007100 0x20>;
 		} ;
+		axi_coproc_int: axi_coproc_int@74400000 {
+                        compatible = "kik,axi_coprocessor_interface";
+                        reg = <0x75800000 0x3000>;
+			kik,input_buffer_offset = <0x1000>;
+			kik,output_buffer_offset = <0x2000>;
+                } ;
+
 	} ;
 } ;
