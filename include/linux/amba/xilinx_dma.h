@@ -50,8 +50,7 @@
  * Xilinx VDMA, hsize must be -1
  */
 struct xilinx_vdma_config {
-	enum dma_transfer_direction direction;
-					/* Channel direction */
+	int reserved;			/* Not used */
 	int vsize;			/* Vertical size */
 	int hsize;			/* Horizontal size */
 	int stride;			/* Stride */
@@ -63,7 +62,6 @@ struct xilinx_vdma_config {
 	int park_frm;			/* Frame to park on */
 	int coalesc;			/* Interrupt coalescing threshold */
 	int delay;			/* Delay counter */
-	int disable_intr;		/* Whether use interrupts */
 	int reset;			/* Reset Channel */
 	int ext_fsync;			/* External Frame Sync */
 };
