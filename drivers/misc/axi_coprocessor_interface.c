@@ -71,14 +71,30 @@ static int interface_close(struct inode *inode, struct file *file)
 static ssize_t interface_read(struct file *file, char __user *buffer, size_t length, loff_t *offset)
 {
 	u32 reg;
-	u32 *buf = (u32*)kmalloc(length + (4 - (length % 4)), GFP_KERNEL);
+	u32 *buf;
 	u32 copied_data = 0;
 	struct interface_priv *priv;
-	
-	if(!buf)
-		return -ENOMEM;
+	/* User should read the whole buffer ad once, otherwise 
+ 	 * some part of the data migth be lost. Actual read data
+ 	 * amount is returned by this function.*/
+	if(length < 2048) {
+		printk(KERN_ERR"Whole buffer (2KiB) should be read at once.\n");
+		return -EINVAL;
+	}
+
 	/* get driver private data */
 	priv = (struct interface_priv*)file->private_data;
+
+	reg = interface_get_register(priv, INTERFACE_STATUS_REG);
+	reg &= INTERFACE_FIFO_OUT_EMPTY_MASK;
+	/* if out FIFO is empty do not try to read data */
+	if(reg) 
+		return 0;
+	
+	buf = (u32*)kmalloc(length + (4 - (length % 4)), GFP_KERNEL);
+
+	if(!buf)
+		return -ENOMEM;
 	
 	/* copy data from FIFO to out buf */
 	reg = interface_get_register(priv, INTERFACE_CONTROL_REG);
@@ -93,12 +109,14 @@ static ssize_t interface_read(struct file *file, char __user *buffer, size_t len
 	while(reg & INTERFACE_FIFO_OUT_COPYING_MASK)
 	{
 		reg = interface_get_register(priv, INTERFACE_STATUS_REG);
+		//kfree(buf);
 	}
 
 	/* get data amount */
 	copied_data = interface_get_register(priv, INTERFACE_FIFO_TRANSFER_STATUS_REG);
 	copied_data &= INTERFACE_OUTPUT_DATA_COPIED_MASK;
 	copied_data >>= INTERFACE_OUTPUT_DATA_COPIED_SHIFT;
+	copied_data ++;
 	copied_data *= 4;
 
 	memcpy(buf, (void*)(priv->mmio + priv->buf_out_offs), copied_data);
@@ -113,32 +131,44 @@ static ssize_t interface_read(struct file *file, char __user *buffer, size_t len
 static ssize_t interface_write(struct file *file, const char __user *buffer, size_t length, loff_t *offset)
 {
 	u32 reg;
-	
-	u32 *buf = (u32*)kmalloc(length + (4 - (length % 4)), GFP_KERNEL); //data must be aligned to 4
+	u32 data_amount;
+	u32 *buf;
 	struct interface_priv *priv;
 	
+
+	/* get driver private data */
+	priv = (struct interface_priv*)file->private_data; 
+
+	/* check if in FIFO is full */
+	reg = interface_get_register(priv, INTERFACE_STATUS_REG);
+	reg &= INTERFACE_FIFO_IN_FULL_MASK;
+	if(reg)	return 0;
+	
+	buf = (u32*)kmalloc(length + (4 - (length % 4)), GFP_KERNEL); //data must be aligned to 4
+
+
 	if(!buf)
 	{
 			printk(KERN_ERR"alloc error \n");
 			return -ENOMEM;
 	}
 	
-	/* get driver private data */
-	priv = (struct interface_priv*)file->private_data; 
-
-	if( copy_from_user(buf, buffer, length) != 0)
+	/* calculate amount of data to copy */
+	data_amount = length > 2048 ? 2048 : length;
+	if( copy_from_user(buf, buffer, data_amount) != 0)
 	{
 		kfree(buf);
 		return -EFAULT;
 	}
 
 	/* copy data to buffer */
-	memcpy( (void*)(priv->mmio + priv->buf_in_offs), buf, length);
+	memcpy( (void*)(priv->mmio + priv->buf_in_offs), buf, data_amount);
 
 	/* push data from buffer into fifo */
 
 	/* set data length */
-	interface_set_register(priv, INTERFACE_FIFO_IN_DATA_AMOUNT_REG, ((length/4) & INTERFACE_IN_DATA_AMOUNT_MASK));
+	/* we need to decrement data amount becouse we put max mem address to the register */
+	interface_set_register(priv, INTERFACE_FIFO_IN_DATA_AMOUNT_REG, (((data_amount-1)/4) & INTERFACE_IN_DATA_AMOUNT_MASK));
 	/* trigger copy process */
 	reg = interface_get_register(priv, INTERFACE_CONTROL_REG);
 	reg &= ~(INTERFACE_COPY_DATA_TO_FIFO);
@@ -158,6 +188,7 @@ static ssize_t interface_write(struct file *file, const char __user *buffer, siz
 	reg = interface_get_register(priv, INTERFACE_FIFO_TRANSFER_STATUS_REG);
 	reg &= INTERFACE_INPUT_DATA_COPIED_MASK;
 	reg >>=INTERFACE_INPUT_DATA_COPIED_SHIFT; 
+	reg ++;
 	reg *= 4;
 	return reg;
 }
